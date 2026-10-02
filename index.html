@@ -156,6 +156,35 @@ const guessCategory = n => {
   return null;
 };
 
+// 常見食材保存期限預設值(天)：肉類/海鮮抓冷凍保存，蔬菜/蛋豆抓冷藏保存，數字取經驗值的中間值
+const SHELF_LIFE_DAYS = [
+  { re:/絞肉/, days:100 },
+  { re:/牛肉|牛排/, days:270 },
+  { re:/豬肉|豬排|排骨/, days:150 },
+  { re:/雞肉|雞腿|雞胸|全雞|雞翅/, days:270 },
+  { re:/培根|香腸|火腿/, days:45 },
+  { re:/蝦|魚|蟹|蛤|花枝|透抽|鮮蚵|干貝|魷魚/, days:120 },
+  { re:/地瓜葉|空心菜|小白菜|韭菜|菠菜|茼蒿|青江菜|A菜/, days:3 },
+  { re:/花椰菜|高麗菜|芥藍/, days:10 },
+  { re:/小黃瓜|甜椒|茄子|四季豆|青椒/, days:7 },
+  { re:/香菇|杏鮑菇|菇/, days:5 },
+  { re:/紅蘿蔔|白蘿蔔|蘿蔔/, days:18 },
+  { re:/番茄/, days:7 },
+  { re:/洋蔥|馬鈴薯|南瓜/, days:30 },
+  { re:/蛋/, days:21 },
+  { re:/豆腐|豆干/, days:5 },
+];
+function guessExpiryDays(n){
+  for(const r of SHELF_LIFE_DAYS){ if(r.re.test(n)) return r.days; }
+  const cat = guessCategory(n);
+  if(cat==="蔬菜") return 5;
+  if(cat==="肉類") return 150;
+  if(cat==="海鮮") return 120;
+  if(cat==="蛋豆製品") return 7;
+  return null;
+}
+function addDays(n){ const d=new Date(); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
+
 /* ============ 狀態 + 儲存(瀏覽器 localStorage，跟 Claude 的雲端無關，關掉分頁/重開機都還在) ============ */
 let state = {
   tab:"fridge",
@@ -164,6 +193,8 @@ let state = {
   shoppingList: [],
   staples: [...DEFAULT_STAPLES],
   categoryTouched:false,
+  expiryTouched:false,
+  showApiKeyBox:false,
   starIngredient:null,
   selectedCombo:[],
   pickSeed:Math.random(),
@@ -245,7 +276,8 @@ function addCustomShopping(name){
 }
 function buyShoppingItem(item){
   state.shoppingList = state.shoppingList.filter(s=>s.id!==item.id);
-  state.fridgeItems.push({id:uid(), name:item.name, category:guessCategory(item.name)||"其他", quantity:1, unit:"份", expiry:""});
+  const days = guessExpiryDays(item.name);
+  state.fridgeItems.push({id:uid(), name:item.name, category:guessCategory(item.name)||"其他", quantity:1, unit:"份", expiry: days?addDays(days):""});
   save(); render();
 }
 function toggleStaple(name){
@@ -260,7 +292,8 @@ function addCustomStaple(name){
 function removeStaple(name){ state.staples = state.staples.filter(n=>n!==name); save(); render(); }
 
 function addSeasonalVeg(name){
-  addItem({name, category:"蔬菜", quantity:1, unit:"份", expiry:""});
+  const days = guessExpiryDays(name) || 5;
+  addItem({name, category:"蔬菜", quantity:1, unit:"份", expiry: addDays(days)});
 }
 
 function toggleComboItem(name){
@@ -275,6 +308,8 @@ function saveApiKey(){
   const v = document.getElementById("ai-key-input").value;
   state.aiApiKey = v.trim();
   save();
+  state.showApiKeyBox = true;
+  render();
   alert("已儲存 API Key 到這台裝置的瀏覽器裡。");
 }
 
@@ -396,7 +431,7 @@ function renderFridge(){
       <div class="row">
         <input type="number" id="f-qty" value="1" min="0" step="0.5" style="width:70px;">
         <input type="text" id="f-unit" value="份" style="width:70px;">
-        <input type="date" id="f-expiry" style="flex:1;">
+        <input type="date" id="f-expiry" style="flex:1;" onchange="state.expiryTouched=true">
         <button class="btn-primary btn-circle" onclick="submitFridgeForm()" aria-label="加入冰箱">＋</button>
       </div>
     </div>
@@ -431,6 +466,10 @@ function onNewNameInput(v){
     const g = guessCategory(v);
     if(g) document.getElementById("f-category").value = g;
   }
+  if(!state.expiryTouched){
+    const days = guessExpiryDays(v);
+    document.getElementById("f-expiry").value = days ? addDays(days) : "";
+  }
 }
 function wireFridgeForm(){
   const catSel = document.getElementById("f-category");
@@ -445,6 +484,7 @@ function submitFridgeForm(){
   const expiry = document.getElementById("f-expiry").value;
   addItem({name, category, quantity, unit, expiry});
   state.categoryTouched = false;
+  state.expiryTouched = false;
 }
 
 function renderSeasoning(){
@@ -492,15 +532,20 @@ function renderRecipe(){
   // AI 生成
   html += `<div class="section"><h2>AI 幫我想菜單</h2>
     <p class="muted">用你自己的 Anthropic API Key，讓 Claude 直接看你冰箱現有的食材跟調味料，即時生成菜單建議。</p>
-    <details style="margin-bottom:10px;">
-      <summary style="color:var(--soy);">設定 API Key（僅存在這台瀏覽器，不會上傳到任何地方；只建議自己使用，不要把這個網站分享給別人）</summary>
-      <div style="margin-top:8px;" class="row">
+    <button class="btn-ghost" style="margin-bottom:10px;" onclick="state.showApiKeyBox=!state.showApiKeyBox;render();">
+      ${state.showApiKeyBox ? "▲ 收起 API Key 設定" : "▼ 設定 API Key"} ${state.aiApiKey ? "（已儲存）" : "（尚未設定）"}
+    </button>`;
+  if(state.showApiKeyBox){
+    html += `<div class="box" style="margin-bottom:10px;">
+      <p class="muted" style="margin-top:0;">僅存在這台瀏覽器，不會上傳到任何地方；只建議自己使用，不要把這個網站分享給別人。</p>
+      <div class="row">
         <input type="password" id="ai-key-input" placeholder="sk-ant-api03-..." value="${state.aiApiKey?state.aiApiKey.replace(/"/g,'&quot;'):''}" style="flex:1;">
-        <button class="btn-ghost" onclick="saveApiKey()">儲存</button>
+        <button class="btn-primary" style="padding:9px 14px;" onclick="saveApiKey()">儲存</button>
       </div>
-      <p class="muted" style="margin-top:6px;">Key 要去 <a class="link" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" style="text-decoration:underline;">console.anthropic.com</a> 申請，跟一般登入 claude.ai 用的帳號是分開的付費/額度系統，需要先設定好帳單才能用。正確格式是 sk-ant-api03- 開頭一長串。</p>
-    </details>
-    <button class="btn-primary" ${state.aiLoading?"disabled":""} onclick="generateAiMenu()">
+      <p class="muted" style="margin-top:8px;margin-bottom:0;">Key 要去 <a class="link" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" style="text-decoration:underline;">console.anthropic.com</a> 申請，跟一般登入 claude.ai 用的帳號是分開的付費/額度系統，需要先設定好帳單才能用。正確格式是 sk-ant-api03- 開頭一長串。</p>
+    </div>`;
+  }
+  html += `<button class="btn-primary" ${state.aiLoading?"disabled":""} onclick="generateAiMenu()">
       ${state.aiLoading? "⏳ 生成中…" : (state.aiRecipes ? "🔄 換一批 AI 建議" : "👨‍🍳 生成 AI 菜單建議")}
     </button>`;
   if(state.aiError){
