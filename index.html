@@ -317,7 +317,7 @@ function saveApiKey(){
 // 用的是 Google Gemini API。模型名稱 Google 偶爾會調整/淘汰，
 // 如果哪天 GEMINI_MODEL 這個名字失效(回應 404)，去 https://ai.google.dev/gemini-api/docs/models
 // 查目前還能用的模型名稱，換掉下面這個常數就好。
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_MODEL = "gemini-3.8-flash";
 
 async function generateAiMenu(){
   if(!state.aiApiKey){
@@ -339,10 +339,10 @@ async function generateAiMenu(){
 {"name":"菜名","canMakeNow":true或false,"missing":["缺的食材或調味料，沒有缺就是空陣列"],"steps":["步驟1","步驟2","步驟3"],"note":"一句話說明為什麼推薦這道(15字內)"}`;
 
   try{
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(state.aiApiKey)}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
     const resp = await fetch(url, {
       method:"POST",
-      headers:{ "content-type":"application/json" },
+      headers:{ "content-type":"application/json", "x-goog-api-key": state.aiApiKey },
       body: JSON.stringify({ contents:[{ parts:[{ text:prompt }] }] }),
     });
     const data = await resp.json();
