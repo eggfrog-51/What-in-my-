@@ -195,6 +195,7 @@ let state = {
   categoryTouched:false,
   expiryTouched:false,
   showApiKeyBox:false,
+  showBackupBox:false,
   starIngredient:null,
   selectedCombo:[],
   pickSeed:Math.random(),
@@ -414,8 +415,59 @@ function render(){
   else if(state.tab==="recipe") body = renderRecipe();
   else if(state.tab==="shopping") body = renderShopping(month, seasonalList);
 
-  main.innerHTML = banner + body;
+  main.innerHTML = banner + renderBackupBox() + body;
   wireFridgeForm();
+}
+
+function toggleBackupBox(){ state.showBackupBox = !state.showBackupBox; render(); }
+
+function renderBackupBox(){
+  let html = `<div style="margin-bottom:16px;">
+    <button class="btn-ghost" onclick="toggleBackupBox()">${state.showBackupBox?"▲ 收起備份/還原":"▼ 備份 / 還原資料（建議設定好後點一次）"}</button>`;
+  if(state.showBackupBox){
+    const json = JSON.stringify({fridgeItems:state.fridgeItems, seasonings:state.seasonings, shoppingList:state.shoppingList, staples:state.staples});
+    html += `<div class="box" style="margin-top:8px;">
+      <p class="muted" style="margin-top:0;">資料只存在這台瀏覽器裡——清瀏覽器資料、換手機、換瀏覽器都會不見，而且不見了就救不回來。建議現在先複製一份存到備忘錄，之後每次登記完新東西也養成習慣複製一次。</p>
+      <p class="muted" style="margin-bottom:4px;">目前的資料：</p>
+      <textarea id="backup-output" rows="3" readonly onclick="this.select()">${json.replace(/</g,"&lt;")}</textarea>
+      <button class="btn-primary" style="margin-top:8px;" onclick="copyBackupText()">📋 複製目前資料</button>
+      <p class="muted" style="margin:14px 0 4px;">還原：把之前複製的文字貼在這裡</p>
+      <textarea id="restore-input" rows="3" placeholder="貼上之前複製的備份文字"></textarea>
+      <button class="btn-jade" style="margin-top:8px;" onclick="restoreBackup()">還原這份資料</button>
+    </div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function copyBackupText(){
+  const ta = document.getElementById("backup-output");
+  ta.focus(); ta.select(); ta.setSelectionRange(0, 999999);
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(ta.value)
+      .then(()=>alert("已複製！貼到備忘錄或 Line「跟自己聊天」存起來。"))
+      .catch(()=>alert("自動複製失敗，文字已經幫你選起來了，請手動「複製」。"));
+  } else {
+    try{ document.execCommand("copy"); alert("已複製！貼到備忘錄存起來。"); }
+    catch(e){ alert("自動複製失敗，文字已經幫你選起來了，請手動「複製」。"); }
+  }
+}
+
+function restoreBackup(){
+  const raw = document.getElementById("restore-input").value;
+  if(!raw || !raw.trim()){ alert("請先把備份文字貼進來再按還原。"); return; }
+  try{
+    const p = JSON.parse(raw);
+    state.fridgeItems = p.fridgeItems || [];
+    state.seasonings = (p.seasonings && p.seasonings.length) ? p.seasonings : state.seasonings;
+    state.shoppingList = p.shoppingList || [];
+    state.staples = (p.staples && p.staples.length) ? p.staples : state.staples;
+    save();
+    alert("已還原成功！");
+    render();
+  }catch(e){
+    alert("這段文字看起來不是有效的備份資料，請確認貼的是完整複製的內容。");
+  }
 }
 
 function renderFridge(){
