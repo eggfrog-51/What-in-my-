@@ -314,13 +314,18 @@ function saveApiKey(){
   alert("已儲存 API Key 到這台裝置的瀏覽器裡。");
 }
 
+// 用的是 Google Gemini API。模型名稱 Google 偶爾會調整/淘汰，
+// 如果哪天 GEMINI_MODEL 這個名字失效(回應 404)，去 https://ai.google.dev/gemini-api/docs/models
+// 查目前還能用的模型名稱，換掉下面這個常數就好。
+const GEMINI_MODEL = "gemini-2.5-flash";
+
 async function generateAiMenu(){
   if(!state.aiApiKey){
-    state.aiError = "請先在下面貼上你自己的 Anthropic API Key 才能使用 AI 生成";
+    state.aiError = "請先在下面貼上你自己的 Google AI (Gemini) API Key 才能使用 AI 生成";
     render(); return;
   }
-  if(!/^sk-ant-/.test(state.aiApiKey)){
-    state.aiError = "這個 Key 格式看起來不太對，正確的 API Key 應該是 sk-ant- 開頭一長串，請確認複製完整、沒有多餘空格";
+  if(!/^AIza/.test(state.aiApiKey)){
+    state.aiError = "這個 Key 格式看起來不太對，Google 的 API Key 通常是 AIza 開頭一長串，請確認複製完整、沒有多餘空格";
     render(); return;
   }
   state.aiLoading = true; state.aiError = ""; render();
@@ -332,28 +337,31 @@ async function generateAiMenu(){
 {"name":"菜名","canMakeNow":true或false,"missing":["缺的食材或調味料，沒有缺就是空陣列"],"steps":["步驟1","步驟2","步驟3"],"note":"一句話說明為什麼推薦這道(15字內)"}`;
 
   try{
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(state.aiApiKey)}`;
+    const resp = await fetch(url, {
       method:"POST",
-      headers:{
-        "content-type":"application/json",
-        "x-api-key": state.aiApiKey,
-        "anthropic-version":"2023-06-01",
-        "anthropic-dangerous-direct-browser-access":"true",
-      },
-      body: JSON.stringify({ model:"claude-sonnet-5", max_tokens:1000, messages:[{role:"user", content:prompt}] }),
+      headers:{ "content-type":"application/json" },
+      body: JSON.stringify({ contents:[{ parts:[{ text:prompt }] }] }),
     });
     const data = await resp.json();
     if(!resp.ok){
       const raw = (data && data.error && data.error.message) || `API 錯誤 (${resp.status})`;
-      if(resp.status === 401 || /api.?key/i.test(raw)){
-        throw new Error("API Key 無效。請確認：1) 是在 console.anthropic.com 申請的完整 Key，不是 claude.ai 的登入帳號 2) 複製時沒有漏字或多空格 3) 這個 Key 沒有被刪除或過期");
+      if(resp.status === 400 && /API key not valid/i.test(raw)){
+        throw new Error("API Key 無效。請確認：1) 是在 aistudio.google.com/app/apikey 申請的完整 Key 2) 複製時沒有漏字或多空格 3) 這個 Key 沒有被刪除");
       }
-      if(resp.status === 400 && /credit|billing/i.test(raw)){
-        throw new Error("帳戶額度不足，請到 console.anthropic.com 確認已設定付款方式並有可用額度");
+      if(resp.status === 404){
+        throw new Error(`找不到模型「${GEMINI_MODEL}」，可能 Google 已經換掉這個名字了，要麻煩你或我去 ai.google.dev/gemini-api/docs/models 查目前可用的模型名稱，更新程式碼裡的 GEMINI_MODEL`);
+      }
+      if(resp.status === 429){
+        throw new Error("這把 Key 的免費額度或速率用完了，稍等一下再試，或去 aistudio.google.com 確認額度");
       }
       throw new Error(raw);
     }
-    const text = (data.content||[]).map(b=>b.text||"").join("").trim();
+    const candidate = (data.candidates && data.candidates[0]) || null;
+    const text = candidate && candidate.content && candidate.content.parts
+      ? candidate.content.parts.map(p=>p.text||"").join("").trim()
+      : "";
+    if(!text) throw new Error("沒有收到內容，可能被安全過濾擋掉了，換個說法或重試看看");
     let clean = text.replace(/```json|```/g,"").trim();
     const s = clean.indexOf("["), e = clean.lastIndexOf("]");
     if(s!==-1 && e!==-1 && e>s) clean = clean.slice(s, e+1);
@@ -581,9 +589,9 @@ function renderRecipe(){
     </div>`;
   }
 
-  // AI 生成
+  // AI 生成（Google Gemini）
   html += `<div class="section"><h2>AI 幫我想菜單</h2>
-    <p class="muted">用你自己的 Anthropic API Key，讓 Claude 直接看你冰箱現有的食材跟調味料，即時生成菜單建議。</p>
+    <p class="muted">用你自己的 Google AI (Gemini) API Key，讓 AI 直接看你冰箱現有的食材跟調味料，即時生成菜單建議。</p>
     <button class="btn-ghost" style="margin-bottom:10px;" onclick="state.showApiKeyBox=!state.showApiKeyBox;render();">
       ${state.showApiKeyBox ? "▲ 收起 API Key 設定" : "▼ 設定 API Key"} ${state.aiApiKey ? "（已儲存）" : "（尚未設定）"}
     </button>`;
@@ -591,10 +599,10 @@ function renderRecipe(){
     html += `<div class="box" style="margin-bottom:10px;">
       <p class="muted" style="margin-top:0;">僅存在這台瀏覽器，不會上傳到任何地方；只建議自己使用，不要把這個網站分享給別人。</p>
       <div class="row">
-        <input type="password" id="ai-key-input" placeholder="sk-ant-api03-..." value="${state.aiApiKey?state.aiApiKey.replace(/"/g,'&quot;'):''}" style="flex:1;">
+        <input type="password" id="ai-key-input" placeholder="AIzaSy..." value="${state.aiApiKey?state.aiApiKey.replace(/"/g,'&quot;'):''}" style="flex:1;">
         <button class="btn-primary" style="padding:9px 14px;" onclick="saveApiKey()">儲存</button>
       </div>
-      <p class="muted" style="margin-top:8px;margin-bottom:0;">Key 要去 <a class="link" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" style="text-decoration:underline;">console.anthropic.com</a> 申請，跟一般登入 claude.ai 用的帳號是分開的付費/額度系統，需要先設定好帳單才能用。正確格式是 sk-ant-api03- 開頭一長串。</p>
+      <p class="muted" style="margin-top:8px;margin-bottom:0;">Key 要去 <a class="link" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" style="text-decoration:underline;">aistudio.google.com/app/apikey</a> 申請，用 Google 帳號登入就能免費建立，正確格式是 AIza 開頭一長串。免費額度通常夠日常使用，用量大的話 Google 會回應額度用完的錯誤訊息。</p>
     </div>`;
   }
   html += `<button class="btn-primary" ${state.aiLoading?"disabled":""} onclick="generateAiMenu()">
